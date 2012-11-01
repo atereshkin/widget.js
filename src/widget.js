@@ -1,13 +1,3 @@
-// widget.js framework
-// Features:
-//  - templating
-//  - multiple display modes and convenience methods
-//  - user tracking that works around 3rd-party cookie restrictions
-//  - style loading
-//  - events/hooks for widget API
-//  - state switching
-
-
 (function(){
 
    Widget = Class.extend(
