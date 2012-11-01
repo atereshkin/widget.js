@@ -1,0 +1,265 @@
+// widget.js framework
+// Features:
+//  - templating
+//  - multiple display modes and convenience methods
+//  - user tracking that works around 3rd-party cookie restrictions
+//  - style loading
+//  - events/hooks for widget API
+//  - state switching
+
+
+(function(){
+
+   Widget = Class.extend(
+     {
+       init : function(parent,
+		       styles,
+		       templates,
+		       options){
+	 this.parent = parent;
+	 this.styles = styles;
+	 this.options = options;
+	 this.templates = templates;
+	 this.panels = {};
+	 this.backend = new Backend(options.origin,
+				    options.endpoints);
+	 this.visible = false;
+	 this._eventListeners = {};
+       },
+
+
+       // Load required scripts and apply styles
+       bootstrap : function(){
+
+	 var _css = this._make('style',
+			       {
+				 'type' : 'text/css',
+				 'textContent' : this.styles
+			       });
+	 if (_css.styleSheet) _css.styleSheet.cssText = this.styles;
+	 document.getElementsByTagName('head')[0].insertBefore(_css, null);
+	 //this.setVuid(this.options.vuid);
+	 this.backend.vuid = this.getVuid();
+
+	 this._processQueue();
+
+	 this.trigger('preInit', {});
+
+	 $(this.prepare.bound);
+	 this.trigger('postInit', {});
+
+       },
+
+       _processQueue : function (){
+	 if (!!window[this._queueName]){
+	   var q = window[this._queueName];
+	   while (1){
+	     if(!('pop' in q))break;
+	     var fn = q.pop();
+	     if (!!fn){
+	       this[fn[0]].apply(this, fn.splice(1, fn.length - 1));
+	     } else break;
+	   }
+	 }
+	 var ths=this;
+	 window[this._queueName] =
+	   {push : function(command){
+	      ths[command[0]].apply(ths, [].splice.call(command,1));
+	    }};
+       },
+
+       //Render initial UI state
+       prepare : function(){
+	 this.createContainer();
+       },
+
+       //create the container element
+       createContainer : function(){
+	 this.$container = $(this.render('widgetbase', {'prefix':this._prefix,'popup':this.options.popup}));
+	 var parent;
+	 if (this.options.popup) { //(this.options.popup) {
+	   parent = $('<div id="'+this._prefix + '-wrapper"></div>').prependTo('body').hide();
+	   this.$wrapper = parent;
+	   this.$glassPane = $('<div id="'+this._prefix+'-mask"></div>').hide().appendTo('body');
+	   $(parent).append(this.$container);
+	 } else {
+	   this.$wrapper = $();
+   	   $('#'+this._prefix+'-script').after(this.$container);
+	 }
+	 this.paneIndex = 0;
+	 this.$viewPort=this.$container.find('#'+this._prefix+'-viewport');
+	 this.$panelStripe=this.$container.find('.'+this._prefix+'-panelstripe');
+	 var ths = this;
+	 this.$container.find('.'+this._prefix + '-close').click(
+	   function(){
+	     ths.hide();
+	   }
+	 );
+       },
+
+       //Add html fragment as a new panel
+       addPanel : function(name, html) {
+	 this.panels[name] =  $(html).appendTo(this.$panelStripe).wrapAll('<div class="'+this._prefix+'-pane '+this._prefix+'-pane-' + name + '"/>').parent();
+	 return this.panels[name];
+       },
+
+       //Show the widget
+       show : function() {
+	 this.visible = true;
+	 this.$container.show();
+	 this.$wrapper.show();
+	 if(typeof this.$glassPane != "undefined")
+	     this.$glassPane.show();
+
+	 this.trigger('show', {});
+       },
+
+       //Hide the widget
+       hide : function() {
+	 this.visible = false;
+	 this.$container.hide();
+	 this.$wrapper.hide();
+	 if(typeof this.$glassPane != "undefined")
+	     this.$glassPane.hide();
+	 this.trigger('hide', {});
+       },
+
+       //"Scroll" panes by *offset* (use negative number to scroll left)
+       scrollBy : function(offset) {
+	 this.scrollTo(this.paneIndex + offset);
+       },
+
+       adjustHeight : function(){
+	 var curHeight = this.$viewPort.height();
+	 var newHeight = $(this.$panelStripe.children()[this.paneIndex]).outerHeight();
+	 this.$viewPort.css({'height' : newHeight + 'px'});
+       },
+
+       //Scroll panes to the index *position*
+       scrollTo : function(position) {
+ 	 var curHeight = this.$viewPort.height();
+	 var newHeight = $(this.$panelStripe.children()[position]).outerHeight();
+	 if (newHeight > curHeight){
+	   this.$viewPort.css({'height' : newHeight + 'px'});
+	 }
+	 this.paneIndex = position;
+	 var ths = this;
+	 var viewportWidth = this.$viewPort.width();
+	 this.$panelStripe.animate({'left' : '-' + position * viewportWidth + 'px'},
+				   function (){
+				     if (newHeight < curHeight){
+				       ths.$viewPort.css({'height' : newHeight + 'px'});
+				     }
+				   });
+       },
+
+       //Render a template by name
+       render : function(template, context){
+	 return tmpl(this.templates[template], context);
+       },
+
+
+       //Set new session id
+       setVuid : function (vuid){
+	 if (typeof localStorage != "undefined")
+	   localStorage[this._prefix + '_vuid']=vuid;
+	 else
+	   this._cookie(this._prefix + '_vuid', vuid, {'expires':365});
+	 this.backend.vuid = vuid;
+       },
+
+       //Get session id
+       getVuid : function (){
+	 var res = '';
+	 if (typeof localStorage != "undefined")
+	   res = localStorage[this._prefix + '_vuid'];
+	 else
+	   res = this._cookie(this._prefix + '_vuid');
+	 if (typeof res == "undefined" || res == null || res == "undefined")
+	     res = '';
+	   return res;
+       },
+
+	 setLocalData : function(key,value){
+	     if (typeof localStorage != "undefined")
+		 localStorage[this._prefix + key]=value;
+	     else
+		 this._cookie(this._prefix + key, value, {'expires':365});
+	 },
+
+	 getLocalData : function(key){
+	     var res = '';
+	     if (typeof localStorage != "undefined")
+		 res = localStorage[this._prefix + key];
+	     else
+		 res = this._cookie(this._prefix + key);
+	     return res;
+	 },
+
+       //Bind a handler to an event
+       bind : function(event, handler){
+	 if (!!!this._eventListeners[event]){
+	   this._eventListeners[event] = [];
+	 }
+	 this._eventListeners[event][this._eventListeners[event].length] = handler;
+       },
+
+       //Trigger an event
+       trigger : function(event, data){
+	 if (!!this._eventListeners[event]){
+	   for (var i=0, l=this._eventListeners[event].length; i < l; i++ ){
+	     this._eventListeners[event][i](data);
+	   }
+	 }
+       },
+
+       //set all obj2 properties on obj1
+       _extend : function(obj1, obj2){
+	 for (var i in obj2){
+	   obj1[i] = obj2[i];
+	 }
+       },
+
+       //create a DOM element with properties props
+       _make : function(elname, props){
+	 var el = document.createElement(elname);
+	 this._extend(el, props);
+	 return el;
+       },
+
+       //Set or get a cookie
+       _cookie : function (key, value, options) {
+	 // key and value given, set cookie...
+	 if (arguments.length > 1 && (value === null || typeof value !== "object")) {
+           var options = options || {};
+
+           if (value === null) {
+             options.expires = -1;
+           }
+
+           if (typeof options.expires === 'number') {
+             var days = options.expires, t = options.expires = new Date();
+             t.setDate(t.getDate() + days);
+           }
+
+           return (document.cookie = [
+		     encodeURIComponent(key), '=',
+		     options.raw ? String(value) : encodeURIComponent(String(value)),
+		     options.expires ? '; expires=' + options.expires.toUTCString() : '', // use expires attribute, max-age is not supported by IE
+		     options.path ? '; path=' + options.path : '',
+		     options.domain ? '; domain=' + options.domain : '',
+		     options.secure ? '; secure' : ''
+		   ].join(''));
+	 }
+
+	 // key and possibly options given, get cookie...
+	 options = value || {};
+	 var result, decode = options.raw ? function (s) { return s; } : decodeURIComponent;
+	 return (result = new RegExp('(?:^|; )' + encodeURIComponent(key) + '=([^;]*)').exec(document.cookie)) ? decode(result[1]) : null;
+       }
+
+       });
+
+ })();
+
+
