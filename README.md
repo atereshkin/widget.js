@@ -1,4 +1,4 @@
-widget.js is a framework for building web widgets - apps that gets embedded into third party sites
+widget.js is a framework for building web widgets - apps that get embedded into third party sites
 Originally developed for and still used in [InviteBox referral program widget](http://invitebox.com/)
 
 Features:
